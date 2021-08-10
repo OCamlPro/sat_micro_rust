@@ -14,6 +14,7 @@ macro_rules! prelude {
 /// See also the [`prelude!`] macro.
 pub mod prelude {
     pub use std::{
+        fmt::Display,
         hash::Hash,
         ops::{Deref, DerefMut},
     };

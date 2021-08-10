@@ -140,7 +140,7 @@ impl<R: Read> Parser<R> {
         })
     }
 
-    pub fn fail(&self, msg: impl std::fmt::Display) -> err::Error {
+    pub fn fail(&self, msg: impl Display) -> err::Error {
         format!("error line {}: {}", self.line + 1, msg).into()
     }
 
