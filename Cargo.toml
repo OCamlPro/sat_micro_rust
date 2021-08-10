@@ -1,0 +1,15 @@
+[workspace]
+members = [
+	"base",
+    "dpll",
+    "front",
+
+    "sat_micro",
+    "sat_micro_bin",
+
+	"manage",
+]
+default-members = [
+    "sat_micro",
+    "sat_micro_bin",
+]
