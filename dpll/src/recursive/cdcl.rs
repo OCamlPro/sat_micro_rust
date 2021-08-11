@@ -1,4 +1,4 @@
-//! Augments the [`Plain` solver][super::Plain] with backjumping.
+//! Augments the [`Backjump` solver][super::Backjump] with CDCL.
 
 prelude!();
 
@@ -10,12 +10,14 @@ macro_rules! raise {
 	{ unsat $deps:expr } => { return Err(Outcome::Unsat($deps)); };
 }
 
-pub type Out<Lit> = Outcome<Lit, Set<Lit>>;
+pub type LClauses<Lit> = Set<LClause<Lit>>;
+
+pub type Out<Lit> = Outcome<Lit, (Set<Lit>, LClauses<Lit>)>;
 pub type Res<T, Lit> = Result<T, Out<Lit>>;
 
-/// Backjump solver.
+/// Backjump + CDCL solver.
 #[derive(Clone)]
-pub struct Backjump<Lit: Literal> {
+pub struct Cdcl<Lit: Literal> {
     /// Environment, *i.e.* a set of literals.
     γ: Γ<Lit>,
     /// CNF we're working on.
@@ -23,12 +25,12 @@ pub struct Backjump<Lit: Literal> {
 }
 
 implem! {
-    impl(Lit: Literal, F: Formula<Lit = Lit>) for Backjump<Lit> {
+    impl(Lit: Literal, F: Formula<Lit = Lit>) for Cdcl<Lit> {
         From<F> {
             |f| Self::new(f),
         }
     }
-    impl(Lit: Literal) for Backjump<Lit> {
+    impl(Lit: Literal) for Cdcl<Lit> {
         Deref<Target = Γ<Lit>> {
             |&self| &self.γ,
             |&mut self| &mut self.γ,
@@ -36,7 +38,7 @@ implem! {
     }
 }
 
-impl<Lit: Literal> Backjump<Lit> {
+impl<Lit: Literal> Cdcl<Lit> {
     /// Construct a naive solver from a formula.
     pub fn new<F: Formula<Lit = Lit>>(f: F) -> Self {
         Self {
@@ -46,7 +48,7 @@ impl<Lit: Literal> Backjump<Lit> {
     }
 }
 
-impl<Lit: Literal> Backjump<Lit> {
+impl<Lit: Literal> Cdcl<Lit> {
     /// Checks internal invariants.
     #[cfg(release)]
     #[inline]
@@ -65,6 +67,23 @@ impl<Lit: Literal> Backjump<Lit> {
                 );
             }
         }
+    }
+
+    pub fn shift(lit: &Lit, lclauses: &LClauses<Lit>) -> LClauses<Lit> {
+        let mut res = LClauses::with_capacity(lclauses.len());
+
+        for lclause in lclauses {
+            let mut new_lclause = lclause.clone();
+            if lclause.labels().contains(lit) {
+                new_lclause.push(lit.ref_negate());
+                let _was_there = new_lclause.labels_mut().remove(lit);
+                debug_assert!(_was_there);
+            }
+            let _is_new = res.insert(new_lclause);
+            debug_assert!(_is_new)
+        }
+
+        res
     }
 
     /// *Assume* rule.
@@ -144,7 +163,7 @@ impl<Lit: Literal> Backjump<Lit> {
             new_deps.shrink_to_fit();
 
             if new_clause.is_empty() {
-                raise!(unsat new_deps)
+                raise!(unsat(new_deps, LClauses::new()))
             } else {
                 if new_clause.len() == 1 {
                     let lit = new_clause.drain(0..).next().expect("unreachable");
@@ -172,14 +191,16 @@ impl<Lit: Literal> Backjump<Lit> {
                 let _is_new = deps.insert(lit.clone());
                 debug_assert!(_is_new);
 
-                let mut deps = match self.assume(lit.clone(), deps)?.unsat() {
+                let (mut deps, mut conflict) = match self.assume(lit.clone(), deps)?.unsat() {
                     // Unreachable.
                     Ok(empty) => match empty {},
                     // Sat, propagate sat result.
                     Err(sat_res @ Out::Sat(_)) => return Err(sat_res),
                     // Conflict, move on.
-                    Err(Out::Unsat(deps)) => deps,
+                    Err(Out::Unsat(unsat_info)) => unsat_info,
                 };
+
+                conflict = Self::shift(lit, &conflict);
 
                 log::debug!(
                     "handling unsat branch with deps:{}",
@@ -192,10 +213,28 @@ impl<Lit: Literal> Backjump<Lit> {
 
                 let lit_was_there = deps.remove(lit);
                 if !lit_was_there {
-                    raise!(unsat deps)
+                    raise!(unsat(deps, conflict))
                 } else {
-                    let n_lit = lit.ref_negate();
-                    self.assume(n_lit, deps)?.unsat()
+                    let nlit = lit.ref_negate();
+                    match {
+                        if conflict.is_empty() {
+                            self.assume(nlit, deps.clone())?.unsat()
+                        } else {
+                            let mut new = self.clone();
+                            new.δ.extend(conflict.iter().cloned());
+                            new.assume(nlit, deps.clone())?.unsat()
+                        }
+                    } {
+                        Ok(empty) => match empty {},
+                        Err(sat_res @ Out::Sat(_)) => return Err(sat_res),
+                        Err(Out::Unsat((new_deps, new_conflict))) => {
+                            conflict.extend(new_conflict);
+                            let conflict_clause =
+                                LClause::new_with(Clause::new(vec![lit.ref_negate()]), deps);
+                            conflict.insert(conflict_clause);
+                            raise!(unsat(new_deps, conflict))
+                        }
+                    }
                 }
             } else {
                 panic!("illegal empty disjunct in application of `unsat` rule")

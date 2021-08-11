@@ -167,7 +167,7 @@ pub fn parse_run<R: std::io::Read>(parser: front::parse::Parser<R>, dpll: DpllIm
     let parsing = parse_end - start;
     let solving = total - parsing;
     println!("c");
-    println!("c | runtime breakdown");
+    println!("c | runtime breakdown for {}", dpll);
     println!(
         "c | parsing: {: >10}.{:0>9} seconds",
         parsing.as_secs(),

@@ -42,25 +42,43 @@ impl Parser<XzDecoder<BufReader<File>>> {
 }
 
 impl<R: Read> Parser<R> {
+    /// Puts the first line from `reader` that's not a comment in `line_buf`.
+    ///
+    /// Return `false` iff the reader reached EOF.
+    fn read_line(reader: &mut BufReader<R>, line_buf: &mut String) -> Res<bool> {
+        loop {
+            line_buf.clear();
+            let bytes_read = reader
+                .read_line(line_buf)
+                .chain_err(|| "while reading first line")?;
+            if bytes_read == 0 {
+                break Ok(false);
+            } else if !line_buf.is_empty() && &line_buf[0..1] == "c" {
+                // Comment line, move on.
+                continue;
+            } else {
+                break Ok(true);
+            }
+        }
+    }
     /// Constructor.
     pub fn new(reader: R) -> Res<Self> {
         let mut reader = BufReader::new(reader);
         let mut line_buf = String::with_capacity(17);
-        reader
-            .read_line(&mut line_buf)
-            .chain_err(|| "while reading first line")?;
 
         const PREF: &str = "p cnf ";
 
         macro_rules! bail {
             {} => {
                 return Err(format!(
-                    "[{}:{}] error on first line, expected `{}<int> <int>` format",
-                    file!(),
-                    line!(),
-                    PREF,
+                    "error on first line, expected `{}<int> <int>` format", PREF,
                 ).into());
             };
+        }
+
+        let got_line = Self::read_line(&mut reader, &mut line_buf)?;
+        if !got_line {
+            bail!()
         }
 
         log::trace!("parsing first CNF line");
@@ -167,8 +185,8 @@ impl<R: Read> Parser<R> {
             self.line += 1;
             log::trace!("parsing line {}", self.line);
             self.line_buf.clear();
-            let read = self.reader.read_line(&mut self.line_buf)?;
-            if read == 0 {
+            let got_line = Self::read_line(&mut self.reader, &mut self.line_buf)?;
+            if !got_line {
                 // EOF reached.
                 break;
             }

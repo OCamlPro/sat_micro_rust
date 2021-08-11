@@ -16,7 +16,7 @@ pub type Res<T, Lit> = Result<T, Out<Lit>>;
 
 /// The first naive implementation from the paper.
 #[derive(Clone)]
-pub struct Plain<Lit> {
+pub struct Plain<Lit: Literal> {
     /// Environment, *i.e.* a set of literals.
     γ: Γ<Lit>,
     /// CNF we're working on.
@@ -24,12 +24,12 @@ pub struct Plain<Lit> {
 }
 
 implem! {
-    impl(Lit, F: Formula<Lit = Lit>) for Plain<Lit> {
+    impl(Lit: Literal, F: Formula<Lit = Lit>) for Plain<Lit> {
         From<F> {
             |f| Self::new(f),
         }
     }
-    impl(Lit) for Plain<Lit> {
+    impl(Lit: Literal) for Plain<Lit> {
         Deref<Target = Γ<Lit>> {
             |&self| &self.γ,
             |&mut self| &mut self.γ,
@@ -37,7 +37,7 @@ implem! {
     }
 }
 
-impl<Lit> Plain<Lit> {
+impl<Lit: Literal> Plain<Lit> {
     /// Construct a naive solver from a formula.
     pub fn new<F>(f: F) -> Self
     where
@@ -50,10 +50,7 @@ impl<Lit> Plain<Lit> {
     }
 }
 
-impl<Lit> Plain<Lit>
-where
-    Lit: Literal,
-{
+impl<Lit: Literal> Plain<Lit> {
     /// *Assume* rule.
     pub fn assume(&self, lit: Lit) -> Res<Self, Lit> {
         log::debug!("assume({})", lit);

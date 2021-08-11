@@ -44,7 +44,7 @@ pub enum Dpll {
 }
 impl Default for Dpll {
     fn default() -> Self {
-        Self::Backjump
+        Self::Cdcl
     }
 }
 impl Dpll {
@@ -75,6 +75,7 @@ implem! {
 }
 
 /// Enumerates DPLL implementation variations.
+#[derive(Debug, Clone, Copy)]
 pub enum DpllImpl {
     /// Recursive implementation.
     Recursive(Dpll),
@@ -155,13 +156,16 @@ pub trait Literal: PartialEq + Eq + PartialOrd + Ord + Hash + Clone + Display {
 }
 
 /// A clause.
-#[derive(Debug, Clone)]
-pub struct Clause<Lit> {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Clause<Lit: Literal> {
     lits: Vec<Lit>,
 }
-impl<Lit> Clause<Lit> {
-    pub fn new(lits: Vec<Lit>) -> Self {
-        Self { lits }
+impl<Lit: Literal> Clause<Lit> {
+    pub fn new(mut lits: Vec<Lit>) -> Self {
+        lits.sort();
+        let res = Self { lits };
+        res.invariant("new");
+        res
     }
     pub fn empty() -> Self {
         Self { lits: vec![] }
@@ -171,9 +175,54 @@ impl<Lit> Clause<Lit> {
             lits: Vec::with_capacity(capa),
         }
     }
+
+    #[cfg(release)]
+    pub fn invariant(&self, _caller: &str) {}
+    #[cfg(not(release))]
+    pub fn invariant(&self, caller: &str) {
+        let mut prev = None;
+        for lit in &self.lits {
+            if let Some(prev) = prev {
+                if prev > lit {
+                    panic!(
+                        "[internal | {}] illegal clause, literals should be sorted",
+                        caller
+                    )
+                }
+            }
+            prev = Some(lit)
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.lits.len()
+    }
+    pub fn iter(&self) -> std::slice::Iter<Lit> {
+        self.lits.iter()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.lits.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.lits.clear()
+    }
+    pub fn push(&mut self, lit: Lit) {
+        match self.lits.binary_search(&lit) {
+            Ok(_) => (),
+            Err(pos) => self.lits.insert(pos, lit),
+        }
+        self.invariant("push");
+    }
+    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> std::vec::Drain<Lit> {
+        self.lits.drain(range)
+    }
+    pub fn shrink_to_fit(&mut self) {
+        self.lits.shrink_to_fit()
+    }
 }
 implem! {
-    impl(Lit: Display) for Clause<Lit> {
+    impl(Lit: Literal) for Clause<Lit> {
         Display {
             |&self, fmt| {
                 for (idx, lit) in self.lits.iter().enumerate() {
@@ -186,20 +235,14 @@ implem! {
             }
         }
     }
-    impl(Lit) for Clause<Lit> {
-        Deref<Target = Vec<Lit>> {
-            |&self| &self.lits,
-            |&mut self| &mut self.lits,
-        }
-    }
 }
 
 /// A CNF formula.
 #[derive(Debug, Clone)]
-pub struct Cnf<Lit> {
+pub struct Cnf<Lit: Literal> {
     clauses: Vec<Clause<Lit>>,
 }
-impl<Lit> Cnf<Lit> {
+impl<Lit: Literal> Cnf<Lit> {
     pub fn new(clauses: Vec<Clause<Lit>>) -> Self {
         Self { clauses }
     }
@@ -216,7 +259,7 @@ impl<Lit> Cnf<Lit> {
     }
 }
 implem! {
-    impl(Lit) for Cnf<Lit> {
+    impl(Lit: Literal) for Cnf<Lit> {
         Deref<Target = Vec<Clause<Lit>>> {
             |&self| &self.clauses,
             |&mut self| &mut self.clauses,
@@ -225,16 +268,39 @@ implem! {
 }
 
 /// A labelled Clause.
-#[derive(Debug, Clone)]
-pub struct LClause<Lit> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LClause<Lit: Literal> {
     clause: Clause<Lit>,
     labels: Set<Lit>,
 }
-impl<Lit> LClause<Lit> {
+impl<Lit: Literal> Hash for LClause<Lit> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.clause.hash(state);
+        for label in &self.labels {
+            label.hash(state)
+        }
+    }
+}
+impl<Lit: Literal> LClause<Lit> {
     /// Constructor.
     pub fn new(clause: Clause<Lit>) -> Self {
         let labels = Set::with_capacity(clause.len());
+        Self::new_with(clause, labels)
+    }
+    /// Constructor from a clause and some labels.
+    pub fn new_with(clause: Clause<Lit>, labels: Set<Lit>) -> Self {
         Self { clause, labels }
+    }
+    /// An empty clause with no labels.
+    pub fn empty() -> Self {
+        Self::new(Clause::empty())
+    }
+    /// An empty clause with a set of labels.
+    pub fn empty_with(labels: Set<Lit>) -> Self {
+        Self {
+            clause: Clause::empty(),
+            labels,
+        }
     }
     /// Clause accessor, note that `Self` already [`Deref`]s to [`Clause<Lit>`].
     pub fn clause(&self) -> &Clause<Lit> {
@@ -244,9 +310,18 @@ impl<Lit> LClause<Lit> {
     pub fn labels(&self) -> &Set<Lit> {
         &self.labels
     }
+    /// Labels accessor, mutable version.
+    pub fn labels_mut(&mut self) -> &mut Set<Lit> {
+        &mut self.labels
+    }
+
+    /// Map over the labels.
+    pub fn labels_map(&mut self, f: impl FnOnce(&mut Set<Lit>)) {
+        f(&mut self.labels)
+    }
 }
 implem! {
-    impl(Lit: Display) for LClause<Lit> {
+    impl(Lit: Literal) for LClause<Lit> {
         Display {
             |&self, fmt| {
                 self.clause.fmt(fmt)?;
@@ -264,7 +339,7 @@ implem! {
             }
         }
     }
-    impl(Lit) for LClause<Lit> {
+    impl(Lit: Literal) for LClause<Lit> {
         From<Clause<Lit>> {
             |clause| Self::new(clause)
         }
@@ -277,10 +352,10 @@ implem! {
 
 /// A labelled CNF.
 #[derive(Debug, Clone)]
-pub struct LCnf<Lit> {
+pub struct LCnf<Lit: Literal> {
     clauses: Vec<LClause<Lit>>,
 }
-impl<Lit> LCnf<Lit> {
+impl<Lit: Literal> LCnf<Lit> {
     pub fn new(clauses: Vec<LClause<Lit>>) -> Self {
         Self { clauses }
     }
@@ -301,7 +376,7 @@ impl<Lit> LCnf<Lit> {
     }
 }
 implem! {
-    impl(Lit) for LCnf<Lit> {
+    impl(Lit: Literal) for LCnf<Lit> {
         Deref<Target = Vec<LClause<Lit>>> {
             |&self| &self.clauses,
             |&mut self| &mut self.clauses,

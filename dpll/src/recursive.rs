@@ -3,10 +3,10 @@
 prelude!();
 
 mod backjump;
+mod cdcl;
 mod plain;
 
-pub use self::backjump::Backjump;
-pub use self::plain::Plain;
+pub use self::{backjump::Backjump, cdcl::Cdcl, plain::Plain};
 
 pub fn solve<F>(f: F, dpll: Dpll) -> Result<Outcome<F::Lit, ()>, String>
 where
@@ -15,6 +15,6 @@ where
     match dpll {
         Dpll::Plain => Ok(Plain::new(f).solve()),
         Dpll::Backjump => Ok(Backjump::new(f).solve()),
-        Dpll::Cdcl => Err("CDCL solver is not implemented yet".into()),
+        Dpll::Cdcl => Ok(Cdcl::new(f).solve()),
     }
 }
