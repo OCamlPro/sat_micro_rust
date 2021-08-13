@@ -1,5 +1,8 @@
 sat_micro::front::prelude!();
 
+use std::time::{Duration, Instant};
+
+use clap::SubCommand;
 use sat_micro::{dpll, front};
 
 pub type Matches = clap::ArgMatches<'static>;
@@ -16,8 +19,9 @@ pub fn dpll_impl_subcommands() -> impl Iterator<Item = clap::App<'static, 'stati
             .subcommands(dpll_subcommands())
     })
 }
-pub fn dpll_impl_from_matches(matches: &Matches) -> Res<dpll::DpllImpl> {
+pub fn dpll_impl_from_matches(matches: &Matches) -> Res<Option<dpll::DpllImpl>> {
     match matches.subcommand() {
+        ("all", Some(_)) => Ok(None),
         (dpll_impl_name, Some(sub_matches)) => match sub_matches.subcommand() {
             (dpll_name, Some(_)) => dpll::DpllImpl::from_name(dpll_impl_name, Some(dpll_name))
                 .ok_or_else(|| {
@@ -26,11 +30,13 @@ pub fn dpll_impl_from_matches(matches: &Matches) -> Res<dpll::DpllImpl> {
                         dpll_impl_name, dpll_name
                     )
                     .into()
-                }),
+                })
+                .map(Some),
             (_, None) => dpll::DpllImpl::from_name(dpll_impl_name, None)
-                .ok_or_else(|| format!("unknown DPLL implementation `{}`", dpll_impl_name).into()),
+                .ok_or_else(|| format!("unknown DPLL implementation `{}`", dpll_impl_name).into())
+                .map(Some),
         },
-        (_, None) => Ok(dpll::DpllImpl::default()),
+        (_, None) => Ok(Some(dpll::DpllImpl::default())),
     }
 }
 
@@ -52,6 +58,7 @@ fn main() {
                 .help("Input file (SAT-comp format)"),
         )
         .subcommands(dpll_impl_subcommands())
+        .subcommand(SubCommand::with_name("all"))
         .get_matches();
 
     // Handles verbosity CLAP and logger setup. Keep this as the first CLAP step so that we can use
@@ -73,17 +80,22 @@ fn main() {
 
     match run(cnf_file_path, &matches) {
         Ok(()) => std::process::exit(0),
-        Err(e) => {
-            eprintln!("|===| Error:");
-            for e in e.iter() {
-                let e = e.to_string();
-                for (idx, line) in e.to_string().lines().enumerate() {
-                    if idx == 0 {
-                        eprint!("| - ")
-                    } else {
-                        eprint!("|   ")
+        Err(errors) => {
+            eprintln!("|===| Error(s):");
+            for (idx, error) in errors.iter().enumerate() {
+                if idx > 0 {
+                    eprintln!("| ")
+                }
+                for e in error.iter() {
+                    let e = e.to_string();
+                    for (idx, line) in e.to_string().lines().enumerate() {
+                        if idx == 0 {
+                            eprint!("| - ")
+                        } else {
+                            eprint!("|   ")
+                        }
+                        eprintln!("{}", line)
                     }
-                    eprintln!("{}", line)
                 }
             }
             eprintln!("|===|");
@@ -92,16 +104,22 @@ fn main() {
     }
 }
 
-pub fn run(cnf_file_path: impl AsRef<std::path::Path>, matches: &Matches) -> Res<()> {
-    let dpll = dpll_impl_from_matches(matches)?;
+pub fn run(
+    cnf_file_path: impl AsRef<std::path::Path>,
+    matches: &Matches,
+) -> Result<(), Vec<err::Error>> {
+    let dpll = dpll_impl_from_matches(matches).map_err(|e| vec![e])?;
     let cnf_file_path = cnf_file_path.as_ref();
     let xz_compressed = match cnf_file_path.extension() {
         Some(ext) if "cnf" == ext => false,
         Some(ext) if "xz" == ext => true,
-        _ => bail!(
-            "could not retrieve extension from `{}`, expected `.cnf` or `.xz`",
-            cnf_file_path.display()
-        ),
+        _ => {
+            return Err(vec![format!(
+                "could not retrieve extension from `{}`, expected `.cnf` or `.xz`",
+                cnf_file_path.display()
+            )
+            .into()])
+        }
     };
 
     use front::parse::Parser;
@@ -109,80 +127,150 @@ pub fn run(cnf_file_path: impl AsRef<std::path::Path>, matches: &Matches) -> Res
     log::debug!("creating parser...");
     if xz_compressed {
         parse_run(
-            Parser::open_xz_file(cnf_file_path).chain_err(|| "while creating xz parser")?,
+            Parser::open_xz_file(cnf_file_path)
+                .chain_err(|| "while creating xz parser")
+                .map_err(|e| vec![e])?,
             dpll,
         )
     } else {
         parse_run(
-            Parser::open_file(cnf_file_path).chain_err(|| "while creating uncompressed parser")?,
+            Parser::open_file(cnf_file_path)
+                .chain_err(|| "while creating uncompressed parser")
+                .map_err(|e| vec![e])?,
             dpll,
         )
     }
 }
 
-pub fn parse_run<R: std::io::Read>(parser: front::parse::Parser<R>, dpll: DpllImpl) -> Res<()> {
-    use std::time::Instant;
-
-    let start = Instant::now();
+pub fn parse_run<R: std::io::Read>(
+    parser: front::parse::Parser<R>,
+    dpll: Option<DpllImpl>,
+) -> Result<(), Vec<err::Error>> {
+    let parse_start = Instant::now();
     log::debug!("running parser...");
-    let cnf = parser.parse()?;
+    let cnf = parser.parse().map_err(|e| vec![e])?;
     let parse_end = Instant::now();
 
-    log::debug!("done parsing {} conjunct(s)", cnf.len());
+    let parse_time = parse_end - parse_start;
+    println!("c done parsing in {} seconds", parse_time.as_secs_f64());
+
+    log::debug!("parsed {} conjunct(s)", cnf.len());
     if log::log_enabled!(log::Level::Trace) {
         for clause in cnf.iter() {
             log::trace!("    {}", clause);
         }
     }
 
-    log::info!("running {}", dpll);
-
-    dpll::solve(cnf, dpll)?.map(
-        // Sat action.
-        |_model| {
-            println!("s SATISFIABLE");
-            for lit in &_model {
-                println!("    {}", lit)
-            }
-            for lit in &_model {
-                let nlit = lit.ref_negate();
-                if _model.contains(&nlit) {
-                    return Err(format!(
-                        "[fatal] inconsistent model contains both {} and {}",
-                        lit, nlit
-                    ));
+    let results = match dpll {
+        Some(dpll) => {
+            log::info!("running {}", dpll);
+            let res = run_one(cnf, dpll).chain_err(|| format!("while running {}", dpll));
+            vec![res]
+        }
+        None => {
+            let all = [
+                DpllImpl::Recursive(Dpll::Plain),
+                DpllImpl::Recursive(Dpll::Backjump),
+                DpllImpl::Recursive(Dpll::Cdcl),
+            ];
+            if log::log_enabled!(log::Level::Info) {
+                log::info!("running the following dpll variants:");
+                for dpll in &all {
+                    log::info!("- {}", dpll)
                 }
             }
-            Ok(())
-        },
-        // Unsat action.
-        |()| {
-            println!("s UNSATISFIABLE");
-            Ok(())
-        },
-    )?;
-    let run_end = Instant::now();
 
-    let total = run_end - start;
-    let parsing = parse_end - start;
-    let solving = total - parsing;
-    println!("c");
-    println!("c | runtime breakdown for {}", dpll);
-    println!(
-        "c | parsing: {: >10}.{:0>9} seconds",
-        parsing.as_secs(),
-        parsing.subsec_nanos()
-    );
-    println!(
-        "c | solving: {: >10}.{:0>9} seconds",
-        solving.as_secs(),
-        solving.subsec_nanos()
-    );
-    println!(
-        "c | total:   {: >10}.{:0>9} seconds",
-        total.as_secs(),
-        total.subsec_nanos()
-    );
+            use rayon::prelude::*;
+            all.par_iter()
+                .map(|dpll| run_one(cnf.clone(), *dpll))
+                .collect()
+        }
+    };
 
-    Ok(())
+    let mut is_sat = None;
+    let mut errors = Vec::<err::Error>::new();
+
+    for res in results {
+        let res = res.and_then(|(dpll, this_outcome, time)| {
+            let sat = this_outcome.map(sat_action, unsat_action)?;
+            const SAT: &str = "SATISFIABLE";
+            const UNSAT: &str = "UNSATISFIABLE";
+            println!(
+                "c {: >40} | {: >13} | {: >15.9} seconds",
+                dpll.to_string(),
+                if sat { SAT } else { UNSAT },
+                time.as_secs_f64()
+            );
+            if is_sat.is_none() {
+                is_sat = Some(sat)
+            } else if is_sat != Some(sat) {
+                errors.push(format!("results do not agree on satisfiability").into())
+            }
+            Ok(())
+        });
+        match res {
+            Ok(()) => (),
+            Err(e) => errors.push(e),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+fn run_one(
+    cnf: dpll::Cnf<front::Lit>,
+    dpll: DpllImpl,
+) -> Res<(DpllImpl, dpll::Outcome<front::Lit, ()>, Duration)> {
+    let start = Instant::now();
+    let res = dpll::solve(cnf, dpll)?;
+    let end = Instant::now();
+
+    log::info!("{} is done", dpll);
+
+    let time = end - start;
+    // let parsing = parse_end - start;
+    // let solving = total - parsing;
+    // println!("c");
+    // println!("c | runtime breakdown for {}", dpll);
+    // println!(
+    //     "c | parsing: {: >10}.{:0>9} seconds",
+    //     parsing.as_secs(),
+    //     parsing.subsec_nanos()
+    // );
+    // println!(
+    //     "c | solving: {: >10}.{:0>9} seconds",
+    //     solving.as_secs(),
+    //     solving.subsec_nanos()
+    // );
+    // println!(
+    //     "c | total:   {: >10}.{:0>9} seconds",
+    //     total.as_secs(),
+    //     total.subsec_nanos()
+    // );
+
+    Ok((dpll, res, time))
+}
+fn sat_action(_model: Set<front::Lit>) -> Res<bool> {
+    // println!("s SATISFIABLE");
+    // for lit in &_model {
+    //     println!("    {}", lit)
+    // }
+    for lit in &_model {
+        let nlit = lit.ref_negate();
+        if _model.contains(&nlit) {
+            return Err(format!(
+                "[fatal] inconsistent model contains both {} and {}",
+                lit, nlit
+            )
+            .into());
+        }
+    }
+    Ok(true)
+}
+fn unsat_action(_: ()) -> Res<bool> {
+    // println!("s UNSATISFIABLE");
+    Ok(false)
 }
