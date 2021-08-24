@@ -11,5 +11,7 @@ simplelog = "^0.10"
 error-chain = "^0.12"
 rayon = "^1.5"
 indicatif = "^0.16"
+reqwest = "^0.11"
+futures = "^0.3"
 
 base = { path = "../base" }

@@ -22,7 +22,7 @@ pub mod prelude {
 
     pub use error_chain::bail;
 
-    pub use crate::err::{Res, ResExt};
+    pub use crate::err::{self, Res, ResExt};
 
     /// Alias for `'static` versions of [`clap::App`].
     pub type App = clap::App<'static, 'static>;
@@ -33,6 +33,7 @@ pub mod prelude {
 prelude!();
 
 pub mod err;
+pub mod retrieve;
 pub mod split;
 
 /// Subcommands (CLAP modes) as static [`str`]s.
@@ -61,6 +62,7 @@ fn main() {
                 .help("Increases verbosity"),
         )
         .subcommand(split::Split::subcommand())
+        .subcommand(retrieve::Retrieve::subcommand())
         .get_matches();
 
     // Handles verbosity CLAP and logger setup. Keep this as the first CLAP step so that we can use
@@ -97,7 +99,7 @@ fn main() {
     }
 }
 
-pub fn run(matches: Matches) -> Res<()> {
+pub fn run(matches: Matches) -> Result<(), Vec<err::Error>> {
     if let Some(split) =
         split::Split::new(&matches).chain_err(|| "[clap] while parsing `split` subcommand")?
     {
@@ -127,6 +129,9 @@ pub fn run(matches: Matches) -> Res<()> {
             split.unknown_tgt.display()
         );
 
+        return Ok(());
+    } else if let Some(retrieve) = retrieve::Retrieve::new(&matches)? {
+        retrieve.run()?;
         return Ok(());
     }
 

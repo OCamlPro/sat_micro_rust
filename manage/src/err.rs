@@ -6,5 +6,11 @@ error_chain::error_chain! {
     }
     foreign_links {
         Io(std::io::Error);
+        HttpRequest(reqwest::Error);
+    }
+}
+impl From<Error> for Vec<Error> {
+    fn from(e: Error) -> Self {
+        vec![e]
     }
 }
