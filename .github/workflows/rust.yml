@@ -22,3 +22,5 @@ jobs:
       run: cargo test --verbose
     - name: Build Release
       run: cargo build --release --verbose
+    - name: Run on Benchmarks
+      run: cargo run --release -p test_all

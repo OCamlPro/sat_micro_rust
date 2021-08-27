@@ -25,6 +25,12 @@ pub mod prelude {
                 Io(std::io::Error);
             }
         }
+
+        impl Into<Vec<Error>> for Error {
+            fn into(self) -> Vec<Error> {
+                vec![self]
+            }
+        }
     }
 }
 

@@ -129,6 +129,7 @@ impl<Lit: Literal> Cdcl<Lit> {
             log::trace!("current clause: {}", lclause);
             new_clause.clear();
             new_deps.clear();
+            new_deps.extend(lclause.labels().iter().cloned());
             // In theory, we should extend `new_deps` by `lclause.labels`. We might as well wait
             // though, because sometimes the whole clause will be dropped. That is, when one of its
             // literals is known to be true in the environment.
@@ -160,18 +161,20 @@ impl<Lit: Literal> Cdcl<Lit> {
             }
 
             new_deps.extend(lclause.labels.iter().cloned());
-            new_deps.shrink_to_fit();
 
             if new_clause.is_empty() {
                 raise!(unsat(new_deps, LClauses::new()))
             } else {
                 if new_clause.len() == 1 {
                     let lit = new_clause.drain(0..).next().expect("unreachable");
-                    let deps = Set::with_capacity(new_deps.len());
-                    new = new.assume(lit, std::mem::replace(&mut new_deps, deps))?;
+                    let mut deps = Set::with_capacity(new_deps.len());
+                    deps.extend(new_deps.drain());
+                    new = new.assume(lit, deps)?;
                 } else {
-                    new_clause.shrink_to_fit();
-                    new.δ.push(new_clause.clone());
+                    new.δ.push(LClause::new_with(
+                        new_clause.drain(0..).collect(),
+                        new_deps.drain().collect(),
+                    ));
                 }
             }
         }
@@ -191,14 +194,15 @@ impl<Lit: Literal> Cdcl<Lit> {
                 let _is_new = deps.insert(lit.clone());
                 debug_assert!(_is_new);
 
-                let (mut deps, mut conflict) = match self.assume(lit.clone(), deps)?.unsat() {
-                    // Unreachable.
-                    Ok(empty) => match empty {},
-                    // Sat, propagate sat result.
-                    Err(sat_res @ Out::Sat(_)) => return Err(sat_res),
-                    // Conflict, move on.
-                    Err(Out::Unsat(unsat_info)) => unsat_info,
-                };
+                let (mut deps, mut conflict) =
+                    match self.assume(lit.clone(), deps).and_then(|new| new.unsat()) {
+                        // Unreachable.
+                        Ok(empty) => match empty {},
+                        // Sat, propagate sat result.
+                        Err(sat_res @ Out::Sat(_)) => return Err(sat_res),
+                        // Conflict, move on.
+                        Err(Out::Unsat(deps)) => deps,
+                    };
 
                 conflict = Self::shift(lit, &conflict);
 

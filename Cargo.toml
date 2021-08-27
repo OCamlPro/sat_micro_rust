@@ -4,10 +4,10 @@ members = [
     "dpll",
     "front",
 
+    "test_all",
+
     "sat_micro",
     "sat_micro_bin",
-
-	"manage",
 ]
 default-members = [
     "sat_micro",

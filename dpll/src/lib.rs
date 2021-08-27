@@ -2,6 +2,8 @@
 
 #![allow(mixed_script_confusables)]
 
+use std::iter::FromIterator;
+
 /// Imports this crate's prelude.
 ///
 /// Pass `pub` when calling this macro to make the imports public.
@@ -129,11 +131,37 @@ impl<Lit, UnsatRes> Outcome<Lit, UnsatRes> {
         Self::Unsat(res)
     }
 
+    /// True if the outcome is sat.
+    pub fn is_sat(&self) -> bool {
+        match self {
+            Self::Sat(_) => true,
+            Self::Unsat(_) => false,
+        }
+    }
+    /// True if the outcome is sat.
+    pub fn is_unsat(&self) -> bool {
+        match self {
+            Self::Unsat(_) => true,
+            Self::Sat(_) => false,
+        }
+    }
+
     /// Map over either the [`Self::Sat`] or [`Self::Unsat`] variant.
     pub fn map<T>(
         self,
         sat_action: impl FnOnce(Set<Lit>) -> T,
         unsat_action: impl FnOnce(UnsatRes) -> T,
+    ) -> T {
+        match self {
+            Self::Sat(γ) => sat_action(γ),
+            Self::Unsat(res) => unsat_action(res),
+        }
+    }
+    /// Map over either the [`Self::Sat`] or [`Self::Unsat`] variant.
+    pub fn map_ref<T>(
+        &self,
+        sat_action: impl FnOnce(&Set<Lit>) -> T,
+        unsat_action: impl FnOnce(&UnsatRes) -> T,
     ) -> T {
         match self {
             Self::Sat(γ) => sat_action(γ),
@@ -159,6 +187,13 @@ pub trait Literal: PartialEq + Eq + PartialOrd + Ord + Hash + Clone + Display {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Clause<Lit: Literal> {
     lits: Vec<Lit>,
+}
+impl<Lit: Literal> FromIterator<Lit> for Clause<Lit> {
+    fn from_iter<T: IntoIterator<Item = Lit>>(iter: T) -> Self {
+        Self {
+            lits: iter.into_iter().collect(),
+        }
+    }
 }
 impl<Lit: Literal> Clause<Lit> {
     pub fn new(mut lits: Vec<Lit>) -> Self {
@@ -371,7 +406,7 @@ impl<Lit: Literal> LCnf<Lit> {
         self.clauses.into_iter()
     }
 
-    pub fn push(&mut self, clause: impl Into<LClause<Lit>>) {
+    pub fn push(&mut self, clause: LClause<Lit>) {
         self.clauses.push(clause.into())
     }
 }

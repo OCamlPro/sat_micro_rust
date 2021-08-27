@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 clap = "^2.33"
+log = "^0.4"
 simplelog = "^0.10"
 rayon = "^1.5"
 sat_micro = { path = "../sat_micro" }
