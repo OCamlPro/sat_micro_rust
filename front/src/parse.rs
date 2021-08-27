@@ -44,20 +44,27 @@ impl Parser<XzDecoder<BufReader<File>>> {
 impl<R: Read> Parser<R> {
     /// Puts the first line from `reader` that's not a comment in `line_buf`.
     ///
-    /// Return `false` iff the reader reached EOF.
-    fn read_line(reader: &mut BufReader<R>, line_buf: &mut String) -> Res<bool> {
+    /// Clears `line_buf`.
+    ///
+    /// Return the number of comment lines read, or `0` if EOI was reached, potentially after
+    /// parsing some comment lines.
+    fn read_line(reader: &mut BufReader<R>, line_buf: &mut String) -> Res<usize> {
+        let mut cnt = 0;
         loop {
             line_buf.clear();
             let bytes_read = reader
                 .read_line(line_buf)
                 .chain_err(|| "while reading first line")?;
-            if bytes_read == 0 {
-                break Ok(false);
-            } else if !line_buf.is_empty() && &line_buf[0..1] == "c" {
-                // Comment line, move on.
-                continue;
+            if bytes_read == 0 || line_buf.trim() == "0" {
+                break Ok(0);
             } else {
-                break Ok(true);
+                cnt += 1;
+                if !line_buf.is_empty() && (&line_buf[0..1] == "c" || &line_buf[0..1] == "%") {
+                    // Comment line, move on.
+                    continue;
+                } else {
+                    break Ok(cnt);
+                }
             }
         }
     }
@@ -66,18 +73,23 @@ impl<R: Read> Parser<R> {
         let mut reader = BufReader::new(reader);
         let mut line_buf = String::with_capacity(17);
 
-        const PREF: &str = "p cnf ";
+        const PREF: &str = "p cnf";
 
+        macro_rules! err {
+            {} => {
+                format!(
+                    "error on first non-comment line, expected `{}<int> <int>` format", PREF,
+                )
+            };
+        }
         macro_rules! bail {
             {} => {
-                return Err(format!(
-                    "error on first line, expected `{}<int> <int>` format", PREF,
-                ).into());
+                return Err(err!().into());
             };
         }
 
-        let got_line = Self::read_line(&mut reader, &mut line_buf)?;
-        if !got_line {
+        let lines_read = Self::read_line(&mut reader, &mut line_buf)?;
+        if lines_read == 0 {
             bail!()
         }
 
@@ -91,87 +103,49 @@ impl<R: Read> Parser<R> {
 
         log::trace!("prefix okay");
 
-        let mut start = PREF.len();
-        let mut cnt = start;
-        let mut chars = line_buf[cnt..].chars();
-        let lit_count = {
-            while let Some(c) = chars.next() {
-                cnt += 1;
-                if c.is_ascii_digit() {
-                    continue;
-                } else if c == ' ' {
-                    break;
-                } else {
-                    bail!()
-                }
-            }
-            if cnt == start {
-                bail!()
-            }
-            let lit_count = &line_buf[start..cnt - 1];
-            log::trace!("lit_count substring: {:?}", lit_count);
-            if let Ok(res) = usize::from_str_radix(lit_count, 10) {
-                res
-            } else {
-                bail!()
-            }
-        };
+        let start = PREF.len();
+
+        let txt = &line_buf[start..];
+        log::trace!("parsing tail `{}`", txt.trim());
+        let mut parser = DisjParser::new(txt);
+        parser.space(1).chain_err(|| err!())?;
+        let lit_count = parser.usize().chain_err(|| err!())?;
         log::trace!("lit_count is {}", lit_count);
-        let disj_count = {
-            start = cnt;
-            if start > line_buf.len() {
-                bail!()
-            }
-            cnt = start;
-            while let Some(c) = chars.next() {
-                cnt += 1;
-                if c.is_ascii_digit() {
-                    continue;
-                } else if c == '\n' {
-                    // This should end the line, meaning we automatically get `None` next. Just
-                    // continueing here to let the normal workflow handle this.
-                    continue;
-                } else {
-                    log::error!("unexpected character `{}`", c);
-                    bail!()
-                }
-            }
-            if cnt == start {
-                bail!()
-            }
-            let disj_count = &line_buf[start..cnt - 1];
-            log::trace!("disj_count substring: {:?}", disj_count);
-            if let Ok(res) = usize::from_str_radix(disj_count, 10) {
-                res
-            } else {
-                bail!()
-            }
-        };
+        log::trace!("parsing tail `{}`", parser.txt.trim());
+        parser.space(1).chain_err(|| err!())?;
+        let disj_count = parser.usize().chain_err(|| err!())?;
         log::trace!("disj_count is {}", disj_count);
 
         Ok(Self {
             reader,
             line_buf,
-            line: 0,
+            line: lines_read,
             lit_count,
             cnf: Cnf::with_capacity(disj_count),
         })
     }
 
     pub fn fail(&self, msg: impl Display) -> err::Error {
-        format!("error line {}: {}", self.line + 1, msg).into()
+        format!(
+            "error line {}: {} `{}`",
+            self.line,
+            msg,
+            self.line_buf.trim()
+        )
+        .into()
     }
 
     fn parse_clause(&mut self) -> Res<()> {
         let mut mini_parser = DisjParser::new(&self.line_buf);
         let mut clause = Clause::with_capacity(7);
+        mini_parser.space(0)?;
         // Line loaded.
         'read_lit: loop {
             match mini_parser.lit()? {
                 Some(lit) => {
                     log::trace!("parsed a lit: {}", lit);
                     clause.push(lit);
-                    mini_parser.space()?;
+                    mini_parser.space(1)?;
                 }
                 None => break 'read_lit,
             }
@@ -182,13 +156,14 @@ impl<R: Read> Parser<R> {
 
     pub fn parse(mut self) -> Res<Cnf<Lit>> {
         loop {
-            self.line += 1;
             log::trace!("parsing line {}", self.line);
             self.line_buf.clear();
-            let got_line = Self::read_line(&mut self.reader, &mut self.line_buf)?;
-            if !got_line {
+            let lines_read = Self::read_line(&mut self.reader, &mut self.line_buf)?;
+            if lines_read == 0 {
                 // EOF reached.
                 break;
+            } else {
+                self.line += lines_read;
             }
 
             self.parse_clause()
@@ -207,14 +182,27 @@ impl<'txt> DisjParser<'txt> {
         Self { txt, cursor: 0 }
     }
 
-    fn space(&mut self) -> Res<()> {
-        const ERR: &str = "expected space character ` `, got end of line";
-        let char = self.txt[self.cursor..].chars().next().ok_or(ERR)?;
-        if char != ' ' {
-            bail!(ERR)
+    fn space(&mut self, min: usize) -> Res<()> {
+        for (idx, c) in self.txt[self.cursor..].chars().enumerate() {
+            if c.is_whitespace() {
+                self.cursor += c.len_utf8()
+            } else if idx < min {
+                bail!("expected space character ` `, got end of line")
+            } else {
+                break;
+            }
         }
-        self.cursor += 1;
         Ok(())
+    }
+    fn usize(&mut self) -> Res<usize> {
+        let end = self.txt[self.cursor..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .fold(self.cursor, |acc, c| acc + c.len_utf8());
+        let n = usize::from_str_radix(&self.txt[self.cursor..end], 10)
+            .chain_err(|| "illegal usize value")?;
+        self.cursor = end;
+        Ok(n)
     }
     fn lit(&mut self) -> Res<Option<Lit>> {
         let (start, negated) = match self.txt[self.cursor..].chars().next() {

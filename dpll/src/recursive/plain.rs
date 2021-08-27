@@ -60,7 +60,7 @@ impl<Lit: Literal> Plain<Lit> {
         if is_new {
             new.bcp()
         } else {
-            Ok(new)
+            panic!("trying to assume a literal twice")
         }
     }
 
@@ -109,11 +109,20 @@ impl<Lit: Literal> Plain<Lit> {
         } else {
             let disj = &self.δ[0];
             if let Some(lit) = disj.iter().next() {
-                let mut new = self.assume(lit.clone())?;
-                new.unsat()?;
+                match self.assume(lit.clone()).and_then(|new| new.unsat()) {
+                    Ok(empty) => match empty {},
+                    Err(e) => {
+                        if e.is_unsat() {
+                            ()
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
 
                 let n_lit = lit.ref_negate();
-                new = self.assume(n_lit)?;
+                log::trace!("backtracking {}", lit);
+                let new = self.assume(n_lit)?;
                 let empty = new.unsat()?;
 
                 match empty {}
