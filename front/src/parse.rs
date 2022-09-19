@@ -84,7 +84,7 @@ impl<R: Read> Parser<R> {
         }
         macro_rules! bail {
             {} => {
-                return Err(err!().into());
+                return Err(err!().into())
             };
         }
 

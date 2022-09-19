@@ -6,8 +6,8 @@ prelude!();
 pub type Γ<Lit> = Map<Lit, Set<Lit>>;
 
 macro_rules! raise {
-	{ sat $γ:expr } => { return Err(Outcome::Sat($γ)); };
-	{ unsat $deps:expr } => { return Err(Outcome::Unsat($deps)); };
+	{ sat $γ:expr } => { return Err(Outcome::Sat($γ)) };
+	{ unsat $deps:expr } => { return Err(Outcome::Unsat($deps)) };
 }
 
 pub type Out<Lit> = Outcome<Lit, Set<Lit>>;
