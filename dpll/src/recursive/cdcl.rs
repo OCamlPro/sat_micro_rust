@@ -1,6 +1,6 @@
 //! Augments the [`Backjump` solver][super::Backjump] with CDCL.
 
-prelude!();
+use crate::prelude::*;
 
 /// Alias for a map from `Lit`s to sets of `Lit`s.
 pub type Γ<Lit> = Map<Lit, Set<Lit>>;

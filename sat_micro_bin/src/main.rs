@@ -1,10 +1,8 @@
-sat_micro::front::prelude!();
-
 use std::time::Instant;
 
 use sat_micro::{dpll, front};
 
-sat_micro::front::prelude!();
+use sat_micro::front::prelude::*;
 
 use crate::conf::*;
 

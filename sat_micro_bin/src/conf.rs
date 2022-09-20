@@ -7,7 +7,7 @@ use log::LevelFilter;
 
 use sat_micro::dpll;
 
-sat_micro::front::prelude!();
+use sat_micro::front::prelude::*;
 
 pub type Matches = clap::ArgMatches<'static>;
 

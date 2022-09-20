@@ -8,7 +8,7 @@ use std::{
 
 use xz2::bufread::XzDecoder;
 
-prelude!();
+use crate::prelude::*;
 
 /// SAT-comp CNF parser.
 pub struct Parser<R: Read> {

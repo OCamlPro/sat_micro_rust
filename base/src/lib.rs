@@ -1,17 +1,6 @@
 //! Common imports used throughout this workspace.
 
-/// Imports this crate's prelude.
-///
-/// Pass `pub` when calling this macro to make the imports public.
-#[macro_export]
-macro_rules! prelude {
-    {} => { use $crate::prelude::*; };
-    {pub } => { pub use $crate::prelude::*; };
-}
-
 /// Common traits and types defined by this crate.
-///
-/// See also the [`prelude!`] macro.
 pub mod prelude {
     pub use std::{
         fmt::Display,

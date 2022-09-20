@@ -1,6 +1,6 @@
 //! Functional versions taken directly from the paper.
 
-prelude!();
+use crate::prelude::*;
 
 mod backjump;
 mod cdcl;
