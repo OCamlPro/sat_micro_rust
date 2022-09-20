@@ -8,8 +8,8 @@ pub type Γ<Lit> = Set<Lit>;
 pub type Out<Lit> = crate::Outcome<Lit, ()>;
 
 macro_rules! raise {
-	{ sat $γ:expr } => { return Err(Out::Sat($γ)); };
-	{ unsat } => { return Err(Out::Unsat(())); };
+	{ sat $γ:expr } => { return Err(Out::Sat($γ)) };
+	{ unsat } => { return Err(Out::Unsat(())) };
 }
 
 pub type Res<T, Lit> = Result<T, Out<Lit>>;
