@@ -10,7 +10,6 @@ pub mod prelude {
 
     pub extern crate log;
     pub use ahash::{AHashMap as Map, AHashSet as Set};
-
     pub use implem::implem;
 
     pub use crate::Empty;

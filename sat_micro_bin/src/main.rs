@@ -1,8 +1,6 @@
 use std::time::Instant;
 
-use sat_micro::{dpll, front};
-
-use sat_micro::front::prelude::*;
+use sat_micro::{dpll, front, front::prelude::*};
 
 use crate::conf::*;
 

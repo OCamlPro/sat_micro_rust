@@ -4,10 +4,7 @@ use std::time::{Duration, Instant};
 
 use clap::SubCommand;
 use log::LevelFilter;
-
-use sat_micro::dpll;
-
-use sat_micro::front::prelude::*;
+use sat_micro::{dpll, front::prelude::*};
 
 pub type Matches = clap::ArgMatches<'static>;
 

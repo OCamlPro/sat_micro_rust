@@ -6,8 +6,7 @@ use std::iter::FromIterator;
 
 /// Common traits and types defined by this crate.
 pub mod prelude {
-    pub use base::prelude::*;
-    pub use base::prelude::implem;
+    pub use base::prelude::{implem, *};
 
     pub use crate::{Clause, Cnf, Dpll, DpllImpl, Formula, LClause, LCnf, Literal, Outcome};
 }

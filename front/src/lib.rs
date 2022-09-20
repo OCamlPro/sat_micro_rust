@@ -1,13 +1,11 @@
 //! Frontend, deals with parsing clauses in the SAT-comp format.
 
 pub mod prelude {
+    pub use dpll::prelude::*;
+    pub use err::{Res, ResExt};
     pub use error_chain::bail;
 
-    pub use dpll::prelude::*;
-
     pub use crate::Lit;
-
-    pub use err::{Res, ResExt};
 
     /// Error-management.
     pub mod err {
