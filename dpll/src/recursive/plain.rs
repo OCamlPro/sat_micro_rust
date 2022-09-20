@@ -1,6 +1,6 @@
 //! Plain DPLL version, with no optimizations.
 
-prelude!();
+use crate::prelude::*;
 
 /// Alias for a set of `Lit`.
 pub type Γ<Lit> = Set<Lit>;

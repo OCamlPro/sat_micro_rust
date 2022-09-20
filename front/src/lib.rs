@@ -1,19 +1,11 @@
 //! Frontend, deals with parsing clauses in the SAT-comp format.
 
-#[macro_export]
-macro_rules! prelude {
-    {} => { use $crate::prelude::*; };
-    { pub } => { pub use $crate::prelude::*; };
-}
-
 pub mod prelude {
+    pub use dpll::prelude::*;
+    pub use err::{Res, ResExt};
     pub use error_chain::bail;
 
-    dpll::prelude!(pub);
-
     pub use crate::Lit;
-
-    pub use err::{Res, ResExt};
 
     /// Error-management.
     pub mod err {
@@ -36,7 +28,7 @@ pub mod prelude {
 
 pub mod parse;
 
-prelude!();
+use crate::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lit {
