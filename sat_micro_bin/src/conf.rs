@@ -6,14 +6,14 @@ use clap::SubCommand;
 use log::LevelFilter;
 use sat_micro::{dpll, front::prelude::*};
 
-pub type Matches = clap::ArgMatches<'static>;
+pub type Matches = clap::ArgMatches;
 
-pub fn dpll_subcommands() -> impl Iterator<Item = clap::App<'static, 'static>> {
+pub fn dpll_subcommands() -> impl Iterator<Item = clap::Command<'static>> {
     dpll::Dpll::NAMES
         .into_iter()
         .map(|(name, about)| clap::SubCommand::with_name(name).about(*about))
 }
-pub fn dpll_impl_subcommands() -> impl Iterator<Item = clap::App<'static, 'static>> {
+pub fn dpll_impl_subcommands() -> impl Iterator<Item = clap::Command<'static>> {
     dpll::DpllImpl::NAMES.into_iter().map(|(name, about)| {
         clap::SubCommand::with_name(name)
             .about(*about)
@@ -22,9 +22,9 @@ pub fn dpll_impl_subcommands() -> impl Iterator<Item = clap::App<'static, 'stati
 }
 pub fn dpll_impl_from_matches(matches: &Matches) -> Res<Option<dpll::DpllImpl>> {
     match matches.subcommand() {
-        ("all", Some(_)) => Ok(None),
-        (dpll_impl_name, Some(sub_matches)) => match sub_matches.subcommand() {
-            (dpll_name, Some(_)) => dpll::DpllImpl::from_name(dpll_impl_name, Some(dpll_name))
+        Some(("all", _)) => Ok(None),
+        Some((dpll_impl_name, sub_matches)) => match sub_matches.subcommand() {
+            Some((dpll_name, _)) => dpll::DpllImpl::from_name(dpll_impl_name, Some(dpll_name))
                 .ok_or_else(|| {
                     format!(
                         "unknown DPLL combination `{}/{}`",
@@ -33,11 +33,11 @@ pub fn dpll_impl_from_matches(matches: &Matches) -> Res<Option<dpll::DpllImpl>> 
                     .into()
                 })
                 .map(Some),
-            (_, None) => dpll::DpllImpl::from_name(dpll_impl_name, None)
+            None => dpll::DpllImpl::from_name(dpll_impl_name, None)
                 .ok_or_else(|| format!("unknown DPLL implementation `{}`", dpll_impl_name).into())
                 .map(Some),
         },
-        (_, None) => Ok(Some(dpll::DpllImpl::default())),
+        None => Ok(Some(dpll::DpllImpl::default())),
     }
 }
 
@@ -55,15 +55,15 @@ pub struct Conf<D> {
 }
 impl Conf1 {
     pub fn new() -> Self {
-        use clap::{crate_authors, crate_description, crate_version, App, Arg};
-        let matches = App::new("sat_micro")
+        use clap::{crate_authors, crate_description, crate_version, Arg, Command};
+        let matches = Command::new("sat_micro")
             .version(crate_version!())
             .author(crate_authors!())
             .about(crate_description!())
             .arg(
                 Arg::with_name("VERB")
-                    .short("v")
-                    .multiple(true)
+                    .short('v')
+                    .multiple_occurrences(true)
                     .help("Increases verbosity"),
             )
             .arg(
@@ -90,7 +90,7 @@ impl Conf1 {
             .arg(
                 Arg::with_name("TIMEOUT")
                     .long("timeout")
-                    .short("t")
+                    .short('t')
                     .takes_value(true)
                     .validator(|s| match u64::from_str_radix(&s, 10) {
                         Ok(_) => Ok(()),

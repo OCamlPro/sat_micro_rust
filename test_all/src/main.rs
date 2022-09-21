@@ -157,15 +157,16 @@ fn run_solver() -> Res<()> {
     Ok(())
 }
 
-fn progress_bar(n: usize) -> indicatif::ProgressBar {
-    let bar = indicatif::ProgressBar::new(n as u64);
+fn progress_bar(n: usize) -> Res<indicatif::ProgressBar> {
+    let bar =
+        indicatif::ProgressBar::new(n as u64).with_finish(indicatif::ProgressFinish::AndClear);
     // let bar = indicatif::ProgressBar::hidden();
     bar.set_style(
         indicatif::ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:70.cyan/blue} {pos:>7}/{len:7} {msg}")
-            .on_finish(indicatif::ProgressFinish::AndClear),
+            .map_err(|e| format!("error setting up progress bar: {}", e))?,
     );
-    bar
+    Ok(bar)
 }
 
 fn run_solver_on_dir(path: impl AsRef<Path>, expected: &str) -> Res<()> {
@@ -180,7 +181,7 @@ fn run_solver_on_dir(path: impl AsRef<Path>, expected: &str) -> Res<()> {
     let entries =
         || std::fs::read_dir(path).chain_err(|| format!("while opening `{}`", path.display()));
 
-    let progress = progress_bar(entries()?.count());
+    let progress = progress_bar(entries()?.count())?;
 
     let error_count = std::sync::RwLock::new(0usize);
 
@@ -222,7 +223,7 @@ fn run_solver_on_dir(path: impl AsRef<Path>, expected: &str) -> Res<()> {
         })
         .collect::<()>();
 
-    progress.finish_at_current_pos();
+    progress.finish();
 
     let error_count = error_count.into_inner().expect("error lock is poisoned");
     if error_count > 0 {

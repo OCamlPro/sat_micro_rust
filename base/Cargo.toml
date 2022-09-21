@@ -7,6 +7,6 @@ edition = "2018"
 
 [dependencies]
 log = "^0.4"
-ahash = "^0.7"
+ahash = "^0.8"
 
 implem = { version = "*", git = "https://github.com/AdrienChampion/implem" }
