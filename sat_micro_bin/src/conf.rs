@@ -2,20 +2,20 @@
 
 use std::time::{Duration, Instant};
 
-use clap::SubCommand;
+use clap::Command;
 use log::LevelFilter;
 use sat_micro::{dpll, front::prelude::*};
 
 pub type Matches = clap::ArgMatches;
 
-pub fn dpll_subcommands() -> impl Iterator<Item = clap::Command<'static>> {
+pub fn dpll_subcommands() -> impl Iterator<Item = Command> {
     dpll::Dpll::NAMES
         .into_iter()
-        .map(|(name, about)| clap::SubCommand::with_name(name).about(*about))
+        .map(|(name, about)| Command::new(name).about(*about))
 }
-pub fn dpll_impl_subcommands() -> impl Iterator<Item = clap::Command<'static>> {
+pub fn dpll_impl_subcommands() -> impl Iterator<Item = Command> {
     dpll::DpllImpl::NAMES.into_iter().map(|(name, about)| {
-        clap::SubCommand::with_name(name)
+        Command::new(name)
             .about(*about)
             .subcommands(dpll_subcommands())
     })
@@ -54,100 +54,92 @@ pub struct Conf<D> {
     pub check_models: bool,
 }
 impl Conf1 {
+    fn validate_bool(s: &str) -> Result<bool, String> {
+        match s {
+            "on" | "true" | "On" | "True" => Ok(true),
+            "off" | "false" | "Off" | "False" => Ok(false),
+            _ => Err(format!("expected boolean `on|true|off|false`, got `{}`", s)),
+        }
+    }
+    fn validate_expect_sat(s: &str) -> Result<bool, String> {
+        match s {
+            "sat" => Ok(true),
+            "unsat" => Ok(false),
+            _ => Err(format!("expected `sat|unsat`, got `{}`", s)),
+        }
+    }
+    fn validate_timeout(s: &str) -> Result<u64, String> {
+        match u64::from_str_radix(&s, 10) {
+            Ok(res) => Ok(res),
+            Err(_) => Err(format!("expected integer, got `{}`", s)),
+        }
+    }
+
     pub fn new() -> Self {
-        use clap::{crate_authors, crate_description, crate_version, Arg, Command};
+        use clap::{crate_authors, crate_description, crate_version, Arg};
         let matches = Command::new("sat_micro")
             .version(crate_version!())
             .author(crate_authors!())
             .about(crate_description!())
             .arg(
-                Arg::with_name("VERB")
+                Arg::new("VERB")
                     .short('v')
-                    .multiple_occurrences(true)
+                    .num_args(0..)
                     .help("Increases verbosity"),
             )
             .arg(
-                Arg::with_name("EXPECTED")
+                Arg::new("EXPECTED")
+                    .value_name("sat|unsat")
                     .long("expect")
-                    .takes_value(true)
-                    .validator(|s| match &s as &str {
-                        "sat" | "unsat" => Ok(()),
-                        _ => Err(format!("expected `sat` or `unsat`, got `{}`", s)),
-                    })
+                    .num_args(1)
+                    .value_parser(Conf1::validate_expect_sat)
                     .help("Specifies the result expected, `sat` or `unsat`"),
             )
             .arg(
-                Arg::with_name("CHECK")
+                Arg::new("CHECK")
+                    .value_name("on|true|off|false")
                     .long("check")
-                    .takes_value(true)
-                    .validator(|s| match &s as &str {
-                        "on" | "off" | "true" | "false" => Ok(()),
-                        _ => Err(format!("expected [on|off|true|false], got `{}`", s)),
-                    })
+                    .num_args(1)
+                    .value_parser(Conf1::validate_bool)
                     .default_value("off")
                     .help("(De)activates model checking, [on|off|true|false]"),
             )
             .arg(
-                Arg::with_name("TIMEOUT")
+                Arg::new("TIMEOUT")
+                    .value_name("INT")
                     .long("timeout")
                     .short('t')
-                    .takes_value(true)
-                    .validator(|s| match u64::from_str_radix(&s, 10) {
-                        Ok(_) => Ok(()),
-                        Err(_) => Err(format!("expected integer, got `{}`", s)),
-                    })
-                    .help("Specifies a timeout in milliseconds"),
+                    .num_args(1)
+                    .value_parser(Conf1::validate_timeout)
+                    .help("Specifies a timeout in milliseconds, must be ≥ 0"),
             )
             .subcommands(dpll_impl_subcommands())
-            .subcommand(SubCommand::with_name("all"))
+            .subcommand(Command::new("all").about("Runs all DPLL variants"))
             .arg(
-                Arg::with_name("FILE")
+                Arg::new("FILE")
                     .required(true)
                     .help("Input file (SAT-comp format)"),
             )
             .get_matches();
 
-        let log_level = match matches.occurrences_of("VERB") {
+        let log_level = match matches.get_occurrences::<()>("VERB").iter().count() {
             0 => log::LevelFilter::Warn,
             1 => log::LevelFilter::Info,
             2 => log::LevelFilter::Debug,
             _ => log::LevelFilter::Trace,
         };
-        let expecting_sat = matches.value_of("EXPECTED").map(|s| match s {
-            "sat" => true,
-            "unsat" => false,
-            s => panic!(
-                "expected result has validator but got an illegal value `{}`",
-                s
-            ),
-        });
-        let timeout_ms = matches
-            .value_of("TIMEOUT")
-            .map(|s| match u64::from_str_radix(s, 10) {
-                Ok(n) => n,
-                Err(e) => panic!(
-                    "timeout has validator but got an illegal value `{}`: {}",
-                    s, e
-                ),
-            });
-        let check_models = match matches
-            .value_of("CHECK")
-            .expect("arguments with default value cannot be absent")
-        {
-            "on" | "true" => true,
-            "off" | "false" => false,
-            val => panic!(
-                "model-check has validator but got an illegal value `{}`",
-                val
-            ),
-        };
+        let expecting_sat = matches.get_one::<bool>("EXPECTED").cloned();
+        let timeout_ms = matches.get_one("TIMEOUT").cloned();
+        let check_models = *matches
+            .get_one("CHECK")
+            .expect("arguments with default value cannot be absent");
 
         let dpll = dpll_impl_from_matches(&matches);
 
         let file = matches
-            .value_of("FILE")
+            .get_one::<String>("FILE")
             .expect("unreachable: `FILE` argument is mandatory")
-            .into();
+            .clone();
 
         Self {
             start: Instant::now(),
